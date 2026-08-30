@@ -4,11 +4,32 @@ import json
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
+import numpy as np
 
 # Import our deterministic business logic functions
 import business_logic
 
 logger = logging.getLogger(__name__)
+
+def clean_numpy_types(obj: Any) -> Any:
+    """Recursively converts numpy types and NaNs to standard Python types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: clean_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_numpy_types(x) for x in obj]
+    elif isinstance(obj, tuple):
+        return tuple(clean_numpy_types(x) for x in obj)
+    elif isinstance(obj, (np.int64, np.int32, np.int16, np.int8)):
+        return int(obj)
+    elif isinstance(obj, (np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif pd.isna(obj):
+        return None
+    elif isinstance(obj, datetime.date):
+        return str(obj)
+    return obj
 
 # System prompt for the BI Agent
 SYSTEM_PROMPT = """You are the Skylark Drones BI Agent, a senior business intelligence assistant for founders and executives.
@@ -190,44 +211,47 @@ class AgentCore:
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any], df_deals: pd.DataFrame, df_wo: pd.DataFrame) -> Dict[str, Any]:
         """Execute the appropriate Python function for a tool call."""
         try:
+            res = {}
             if tool_name == "get_pipeline_summary":
                 sector = arguments.get("sector")
                 time_expr = arguments.get("time_expression")
                 quarter, year = None, None
                 if time_expr:
                     quarter, year = resolve_relative_quarter(time_expr)
-                return business_logic.get_pipeline_summary(df_deals, sector=sector, quarter=quarter, year=year)
+                res = business_logic.get_pipeline_summary(df_deals, sector=sector, quarter=quarter, year=year)
                 
             elif tool_name == "get_pipeline_by_sector":
-                return {"sectors": business_logic.get_pipeline_by_sector(df_deals)}
+                res = {"sectors": business_logic.get_pipeline_by_sector(df_deals)}
                 
             elif tool_name == "get_pipeline_by_stage":
-                return {"stages": business_logic.get_pipeline_by_stage(df_deals)}
+                res = {"stages": business_logic.get_pipeline_by_stage(df_deals)}
                 
             elif tool_name == "get_top_deals":
                 limit = arguments.get("limit", 5)
-                return {"top_deals": business_logic.get_top_deals(df_deals, limit=limit)}
+                res = {"top_deals": business_logic.get_top_deals(df_deals, limit=limit)}
                 
             elif tool_name == "get_high_probability_deals":
-                return {"high_probability_deals": business_logic.get_high_probability_deals(df_deals)}
+                res = {"high_probability_deals": business_logic.get_high_probability_deals(df_deals)}
                 
             elif tool_name == "get_delayed_work_orders":
-                return {"delayed_work_orders": business_logic.get_delayed_work_orders(df_wo)}
+                res = {"delayed_work_orders": business_logic.get_delayed_work_orders(df_wo)}
                 
             elif tool_name == "get_operational_summary":
-                return business_logic.get_operational_summary(df_wo)
+                res = business_logic.get_operational_summary(df_wo)
                 
             elif tool_name == "get_revenue_and_collections":
-                return business_logic.get_revenue_summary(df_deals, df_wo)
+                res = business_logic.get_revenue_summary(df_deals, df_wo)
                 
             elif tool_name == "get_cross_board_sector_performance":
-                return {"sectors_performance": business_logic.get_cross_board_sector_performance(df_deals, df_wo)}
+                res = {"sectors_performance": business_logic.get_cross_board_sector_performance(df_deals, df_wo)}
                 
             elif tool_name == "get_data_quality_report":
-                return business_logic.generate_data_quality_report(df_deals, df_wo)
+                res = business_logic.generate_data_quality_report(df_deals, df_wo)
                 
             else:
-                return {"error": f"Tool '{tool_name}' not implemented."}
+                res = {"error": f"Tool '{tool_name}' not implemented."}
+                
+            return clean_numpy_types(res)
         except Exception as e:
             logger.error(f"Error executing tool '{tool_name}': {e}")
             return {"error": f"Internal execution error: {str(e)}"}
@@ -282,7 +306,7 @@ class AgentCore:
             # Process tool calls
             for tool_call in response_message.tool_calls:
                 name = tool_call.function.name
-                args = json.loads(tool_call.function.argv if hasattr(tool_call.function, "argv") else tool_call.function.arguments)
+                args = json.loads(tool_call.function.arguments)
                 
                 logger.info(f"OpenAI calls tool: {name} with args: {args}")
                 result = self._execute_tool(name, args, df_deals, df_wo)

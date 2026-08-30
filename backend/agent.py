@@ -209,7 +209,10 @@ class Agent:
                 )
             except Exception as e:
                 logger.error(f"OpenAI completion request failure: {e}")
-                return f"Error: Failed to connect to AI engine ({str(e)}). Please verify your API Key."
+                # Fall back to deterministic calculations output
+                logger.info("Falling back to deterministic mock response due to OpenAI API exception.")
+                deterministic_response = self._run_mock_turn(conversation_history, df_deals, df_wo)
+                return f"⚠️ **AI Engine connection failed (Error: {str(e)}). Displaying deterministic Python calculations fallback:**\n\n" + deterministic_response
 
             response_message = response.choices[0].message
             messages.append(response_message)

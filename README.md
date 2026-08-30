@@ -1,7 +1,19 @@
+---
+title: Skylark BI Agent
+emoji: 🦅
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+sdk_version: "1.30.0"
+app_file: app.py
+pinned: true
+license: mit
+---
+
 # Skylark Drones Monday.com BI Agent
 
-Live Demo: `[[LIVE_DEMO_URL_PLACEHOLDER]]`
-GitHub: `[[GITHUB_REPO_URL_PLACEHOLDER]]`
+🚀 **Live Demo**: [https://huggingface.co/spaces/ummitiakshitha/skylark-bi-agent](https://huggingface.co/spaces/ummitiakshitha/skylark-bi-agent)  
+📦 **GitHub**: [https://github.com/ummitiakshitha/skylark-monday-bi-agent](https://github.com/ummitiakshitha/skylark-monday-bi-agent)
 
 An enterprise-grade, conversational Business Intelligence Agent for Skylark Drones that queries **Monday.com Deals & Work Orders** live via the Monday.com GraphQL API to answer founder-level queries, audit data quality, and generate structured executive leadership updates.
 
@@ -68,12 +80,6 @@ skylark-bi-agent/
 │   ├── Deal funnel Data.xlsx
 │   └── Work_Order_Tracker Data.xlsx
 │
-├── screenshots/                   # Verification screenshots
-│   ├── 01-home.png
-│   ├── 02-energy-pipeline.png
-│   ├── 03-cross-board.png
-│   └── 04-leadership-update.png
-│
 ├── discover_boards.py             # Script to list Monday.com board IDs
 ├── requirements.txt               # App dependencies
 ├── .env.example                   # Template env config
@@ -135,7 +141,7 @@ These metrics are dynamically displayed to the founder in a context panel under 
 
 ## 8. Security & Credentials Setup
 
-The application reads secrets from environment variables (local `.env` file or Streamlit Secrets):
+The application reads secrets from environment variables (local `.env` file or **Hugging Face Space Secrets**):
 - `MONDAY_API_TOKEN` - Monday.com Developer API Token
 - `DEALS_BOARD_ID` - Monday.com Deals Board ID
 - `WORK_ORDERS_BOARD_ID` - Monday.com Work Orders Board ID
@@ -168,15 +174,20 @@ cp .env.example .env
 
 ---
 
-## 10. Deployment to Streamlit Cloud
+## 10. Deployment to Hugging Face Spaces
 
-1. Commit and push the clean repository to GitHub.
-2. Link the repository to your [Streamlit Community Cloud](https://share.streamlit.io/) account.
-3. Under **App Settings -> Secrets**, paste the keys:
-   ```toml
-   MONDAY_API_TOKEN = "your_token"
-   DEALS_BOARD_ID = "your_deals_id"
-   WORK_ORDERS_BOARD_ID = "your_orders_id"
-   OPENAI_API_KEY = "your_openai_key"
+1. Ensure this `README.md` contains the YAML frontmatter header at the top (already done).
+2. Add the HF Space as a git remote and push:
+   ```bash
+   git remote add space https://huggingface.co/spaces/ummitiakshitha/skylark-bi-agent
+   git push space main
    ```
-4. Click **Deploy**. The app will run publicly, querying Monday.com live at runtime with zero configurations required from the evaluator.
+3. Go to your Space → **Settings** → **Variables and secrets** and add each key as a **Secret**:
+   ```
+   MONDAY_API_TOKEN     = your_token
+   DEALS_BOARD_ID       = your_deals_board_id
+   WORK_ORDERS_BOARD_ID = your_work_orders_board_id
+   OPENAI_API_KEY       = your_openai_key
+   ```
+4. The Space auto-builds and goes live at:  
+   **https://huggingface.co/spaces/ummitiakshitha/skylark-bi-agent**

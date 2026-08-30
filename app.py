@@ -65,14 +65,14 @@ st.markdown("""
         margin-bottom: 15px;
     }
 </style>
-""", unsafe_html=True)
+""", unsafe_allow_html=True)
 
 # App Header
 st.title("🦅 Skylark Drones BI Agent")
 st.markdown("An executive intelligence agent querying **Monday.com Work Orders & Deals** live.")
 
 # Sidebar Configuration & Diagnostics
-st.sidebar.image("https://www.skylarkdrones.com/assets/images/logo.png", width=180, error_handling="skip")
+st.sidebar.markdown("<h2 style='text-align: center; color: #3b82f6; margin-bottom: 20px; font-weight: 700; letter-spacing: 1px;'>🦅 SKYLARK BI</h2>", unsafe_allow_html=True)
 st.sidebar.markdown("### System Status")
 
 # Check credentials
@@ -91,9 +91,9 @@ if use_local_excel:
     st.sidebar.markdown("Data Source: 📂 **Local Excel Mock** (Local Dev Only)")
 else:
     if monday_token and deals_board_id and wo_board_id:
-        st.sidebar.markdown("Data Source: <span class='status-active'>✓ Monday.com API (Live)</span>", unsafe_html=True)
+        st.sidebar.markdown("Data Source: <span class='status-active'>✓ Monday.com API (Live)</span>", unsafe_allow_html=True)
     else:
-        st.sidebar.markdown("Data Source: <span class='status-inactive'>✗ Monday.com API (Missing Keys)</span>", unsafe_html=True)
+        st.sidebar.markdown("Data Source: <span class='status-inactive'>✗ Monday.com API (Missing Keys)</span>", unsafe_allow_html=True)
 
 # LLM Status
 llm_provider = None
@@ -101,13 +101,13 @@ llm_key = None
 if openai_key:
     llm_provider = "OpenAI"
     llm_key = openai_key
-    st.sidebar.markdown("AI Engine: <span class='status-active'>✓ OpenAI Connected</span>", unsafe_html=True)
+    st.sidebar.markdown("AI Engine: <span class='status-active'>✓ OpenAI Connected</span>", unsafe_allow_html=True)
 elif anthropic_key:
     llm_provider = "Anthropic"
     llm_key = anthropic_key
-    st.sidebar.markdown("AI Engine: <span class='status-active'>✓ Anthropic Connected</span>", unsafe_html=True)
+    st.sidebar.markdown("AI Engine: <span class='status-active'>✓ Anthropic Connected</span>", unsafe_allow_html=True)
 else:
-    st.sidebar.markdown("AI Engine: <span class='status-inactive'>✗ Missing LLM Key</span>", unsafe_html=True)
+    st.sidebar.markdown("AI Engine: <span class='status-inactive'>✗ Missing LLM Key</span>", unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 
@@ -212,7 +212,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if "metadata" in msg:
-            st.markdown(f"<div class='metadata-block'>{msg['metadata']}</div>", unsafe_html=True)
+            st.markdown(f"<div class='metadata-block'>{msg['metadata']}</div>", unsafe_allow_html=True)
 
 # Main chat input execution
 user_query = st.chat_input("Ask a question about pipeline, sectors, delays, or prepare a leadership update...")
@@ -261,7 +261,7 @@ if user_query:
                     
                     # Display response
                     message_placeholder.markdown(response_text)
-                    st.markdown(f"<div class='metadata-block'>{metadata_html}</div>", unsafe_html=True)
+                    st.markdown(f"<div class='metadata-block'>{metadata_html}</div>", unsafe_allow_html=True)
                     
                     # Save to state
                     st.session_state.messages.append({

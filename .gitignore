@@ -10,8 +10,8 @@ ENV/
 env/
 .env
 
-# Streamlit config and secrets (Streamlit config should be server-side)
-.streamlit/
+# Streamlit secrets (keep out of git, add via Streamlit Cloud UI)
+.streamlit/secrets.toml
 
 # IDE files
 .vscode/

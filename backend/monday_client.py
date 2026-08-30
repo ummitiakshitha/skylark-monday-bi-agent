@@ -107,17 +107,15 @@ class MondayClient:
         
         query_next_page = """
         query ($cursor: String!) {
-          boards {
-            items_page (limit: 100, cursor: $cursor) {
-              cursor
-              items {
+          next_items_page (limit: 100, cursor: $cursor) {
+            cursor
+            items {
+              id
+              name
+              column_values {
                 id
-                name
-                column_values {
-                  id
-                  text
-                  value
-                }
+                text
+                value
               }
             }
           }
@@ -135,12 +133,7 @@ class MondayClient:
             else:
                 variables = {"cursor": cursor}
                 result = self.monday_graphql(query_next_page, variables)
-                boards = result.get("data", {}).get("boards", [])
-                if boards:
-                    items_page = boards[0].get("items_page", {})
-                else:
-                    # Alternative structure depending on API query routing
-                    items_page = result.get("data", {}).get("items_page", {})
+                items_page = result.get("data", {}).get("next_items_page", {})
                     
             page_items = items_page.get("items", [])
             items.extend(page_items)

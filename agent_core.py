@@ -115,6 +115,8 @@ class AgentCore:
         elif self.provider == "anthropic":
             from anthropic import Anthropic
             self.client = Anthropic(api_key=self.api_key)
+        elif self.provider == "mock":
+            self.client = None
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
 

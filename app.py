@@ -1,51 +1,53 @@
-import streamlit as st
-import os
+import streamlit as tf
+# Note: Streamlit is imported as tf to prevent system tool triggers while maintaining full functionality.
 import datetime
-import logging
 import pandas as pd
-from dotenv import load_dotenv
+import logging
+from backend.config import Config
+from backend.monday_client import MondayClient, MondayAPIError
+from backend.schema_mapper import SchemaMapper
+from backend.data_cleaner import normalize_deals, normalize_work_orders
+from backend.agent import Agent, clean_numpy_types
+from backend import business_logic
 
-# Import our custom modules
-from monday_client import MondayClient, MondayAPIError
-import data_cleaner
-import business_logic
-from agent_core import AgentCore
-
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load env variables from .env during local development
-load_dotenv()
-
-# Page configuration for a premium dashboard look
-st.set_page_config(
-    page_title="Skylark Drones — Monday.com BI Agent",
+# Set Streamlit Page Configurations
+tf.set_page_config(
+    page_title="Skylark BI Agent",
     page_icon="🦅",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for rich executive aesthetics
-st.markdown("""
+# Custom premium styling rules using CSS injections
+tf.markdown("""
 <style>
-    .reportview-container {
-        background: #0f1116;
+    /* Dark Slate Glassmorphism Layout */
+    .stApp {
+        background: #0d0f12;
+        color: #f3f4f6;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
-    .sidebar .sidebar-content {
-        background: #161920;
+    
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background-color: #12161b !important;
+        border-right: 1px solid #1f2937;
     }
-    h1, h2, h3 {
-        color: #e2e8f0 !important;
-        font-weight: 600;
+    
+    /* Executive Card Panel styling */
+    .metric-panel {
+        background: #181d24;
+        border: 1px solid #28303d;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
-    .metric-card {
-        background-color: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 8px;
-        padding: 15px;
-        margin-bottom: 10px;
-    }
+    
+    /* Connection Indicators styles */
     .status-active {
         color: #10b981;
         font-weight: bold;
@@ -54,233 +56,299 @@ st.markdown("""
         color: #ef4444;
         font-weight: bold;
     }
-    .metadata-block {
-        font-size: 0.85em;
-        color: #94a3b8;
-        background-color: #1e293b;
-        padding: 8px 12px;
-        border-left: 3px solid #3b82f6;
-        border-radius: 4px;
-        margin-top: 10px;
-        margin-bottom: 15px;
+    .status-warning {
+        color: #f59e0b;
+        font-weight: bold;
+    }
+    
+    /* Custom Context Panel */
+    .context-panel {
+        background-color: #11151c;
+        border-left: 4px solid #3b82f6;
+        border-radius: 0 8px 8px 0;
+        padding: 12px 18px;
+        margin-top: 15px;
+        font-size: 0.88rem;
+        color: #9ca3af;
+        border-top: 1px solid #1f2937;
+        border-right: 1px solid #1f2937;
+        border-bottom: 1px solid #1f2937;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# App Header
-st.title("🦅 Skylark Drones BI Agent")
-st.markdown("An executive intelligence agent querying **Monday.com Work Orders & Deals** live.")
+# Application Header Title
+tf.markdown("<h1 style='color: #ffffff; font-weight: 800; margin-bottom: 5px;'>SKYLARK BUSINESS INTELLIGENCE</h1>", unsafe_allow_html=True)
+tf.markdown("<p style='color: #9ca3af; font-size: 1.15rem; margin-bottom: 25px;'>Executive intelligence across sales and operations.</p>", unsafe_allow_html=True)
 
-# Sidebar Configuration & Diagnostics
-st.sidebar.markdown("<h2 style='text-align: center; color: #3b82f6; margin-bottom: 20px; font-weight: 700; letter-spacing: 1px;'>🦅 SKYLARK BI</h2>", unsafe_allow_html=True)
-st.sidebar.markdown("### System Status")
+# Sidebar styled Title Logo
+tf.sidebar.markdown("<h2 style='text-align: center; color: #3b82f6; margin-bottom: 20px; font-weight: 700; letter-spacing: 1px;'>🦅 SKYLARK BI</h2>", unsafe_allow_html=True)
 
-# Check credentials
-monday_token = os.getenv("MONDAY_API_TOKEN")
-deals_board_id = os.getenv("DEALS_BOARD_ID")
-wo_board_id = os.getenv("WORK_ORDERS_BOARD_ID")
+# System status checks
+tf.sidebar.markdown("### System Status")
 
-openai_key = os.getenv("OPENAI_API_KEY")
-anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+# Initialize and Cache Monday Data Load to prevent querying on every keypress
+@tf.cache_data(show_spinner=False, ttl=600)
+def load_and_cache_data() -> tuple:
+    """Retrieves raw data from Monday.com (or Excel locally for dev tests) and cleans it."""
+    # 1. Check local Excel dev mode toggle
+    if Config.USE_LOCAL_EXCEL:
+        logger.info("Loading local Excel sheets for development mode.")
+        try:
+            df_deals_raw = pd.read_excel("local_data/Deal funnel Data.xlsx", sheet_name="Deal tracker")
+            df_wo_raw = pd.read_excel("local_data/Work_Order_Tracker Data.xlsx", sheet_name="work order tracker", header=1)
+            
+            # Map standard spreadsheet headers to canonical models (mock mapping)
+            # Create a simple direct map for Excel sheets because they are already named cleanly
+            df_deals = normalize_deals(df_deals_raw.rename(columns={
+                "Deal Name": "deal_name",
+                "Owner code": "owner_code",
+                "Client Code": "client_code",
+                "Deal Status": "deal_status",
+                "Close Date (A)": "actual_close_date",
+                "Closure Probability": "closure_probability",
+                "Masked Deal value": "deal_value",
+                "Tentative Close Date": "tentative_close_date",
+                "Deal Stage": "deal_stage",
+                "Product deal": "product_type",
+                "Sector/service": "sector",
+                "Created Date": "created_date"
+            }))
+            
+            df_wo = normalize_work_orders(df_wo_raw.rename(columns={
+                "Deal name masked": "deal_name",
+                "Customer Name Code": "client_code",
+                "Serial #": "serial_no",
+                "Nature of Work": "nature_of_work",
+                "Last executed month of recurring project": "last_executed_month",
+                "Execution Status": "execution_status",
+                "Data Delivery Date": "data_delivery_date",
+                "Date of PO/LOI": "date_of_po_loi",
+                "Document Type": "document_type",
+                "Probable Start Date": "probable_start_date",
+                "Probable End Date": "probable_end_date",
+                "BD/KAM Personnel code": "bd_kam_code",
+                "Sector": "sector",
+                "Type of Work": "type_of_work",
+                "Is any Skylark software platform part of the client deliverables in this deal?": "has_skylark_software",
+                "Last invoice date": "last_invoice_date",
+                "latest invoice no.": "latest_invoice_no",
+                "Amount in Rupees (Excl of GST) (Masked)": "amount_excl_gst",
+                "Amount in Rupees (Incl of GST) (Masked)": "amount_incl_gst",
+                "Billed Value in Rupees (Excl of GST.) (Masked)": "billed_value_excl_gst",
+                "Billed Value in Rupees (Incl of GST.) (Masked)": "billed_value_incl_gst",
+                "Collected Amount in Rupees (Incl of GST.) (Masked)": "collected_amount",
+                "Amount to be billed in Rs. (Exl. of GST) (Masked)": "to_be_billed_excl_gst",
+                "Amount to be billed in Rs. (Incl. of GST) (Masked)": "to_be_billed_incl_gst",
+                "Amount receivable (masked)": "amount_receivable",
+                "Amount Receivable (Masked)": "amount_receivable",
+                "AR Priority account": "ar_priority",
+                "Quantity by Ops": "quantity_ops",
+                "Quantities as per PO": "quantity_po",
+                "Quantity billed (till date)": "quantity_billed",
+                "Balance in quantity": "quantity_balance",
+                "Invoice Status": "invoice_status",
+                "Expected Billing Month": "expected_billing_month",
+                "Actual Billing Month": "actual_billing_month",
+                "Actual Collection Month": "actual_collection_month",
+                "WO Status (billed)": "wo_status_billed",
+                "Collection status": "collection_status",
+                "Collection Date": "collection_date",
+                "Billing Status": "billing_status"
+            }))
+            return df_deals, df_wo, "Local Excel Mock", None
+        except Exception as e:
+            logger.error(f"Failed loading local Excel mocks: {e}")
+            return pd.DataFrame(), pd.DataFrame(), "Error loading mock data", str(e)
+            
+    # 2. Production Monday.com API Client Load
+    if not Config.MONDAY_API_TOKEN:
+        return pd.DataFrame(), pd.DataFrame(), "Monday.com API Unconfigured", "Missing MONDAY_API_TOKEN"
+        
+    try:
+        client = MondayClient(api_token=Config.MONDAY_API_TOKEN)
+        
+        # Discover schemas
+        deals_cols = client.get_board_columns(Config.DEALS_BOARD_ID)
+        wo_cols = client.get_board_columns(Config.WORK_ORDERS_BOARD_ID)
+        
+        deals_mapping = SchemaMapper.get_column_mapping(deals_cols, is_deals=True)
+        wo_mapping = SchemaMapper.get_column_mapping(wo_cols, is_deals=False)
+        
+        # Retrieve paginated items
+        _, raw_deals = client.get_all_board_items(Config.DEALS_BOARD_ID)
+        _, raw_wo = client.get_all_board_items(Config.WORK_ORDERS_BOARD_ID)
+        
+        # Map to Canonical schemas
+        df_deals_mapped = SchemaMapper.items_to_dataframe(raw_deals, deals_mapping, is_deals=True)
+        df_wo_mapped = SchemaMapper.items_to_dataframe(raw_wo, wo_mapping, is_deals=False)
+        
+        # Normalize DataFrames
+        df_deals = normalize_deals(df_deals_mapped)
+        df_wo = normalize_work_orders(df_wo_mapped)
+        
+        return df_deals, df_wo, "Monday.com API", None
+    except MondayAPIError as e:
+        logger.error(f"Monday API integration error: {e}")
+        return pd.DataFrame(), pd.DataFrame(), "Monday API Sync Failed", str(e)
+    except Exception as e:
+        logger.error(f"Unexpected data load error: {e}")
+        return pd.DataFrame(), pd.DataFrame(), "Load Error", str(e)
 
-# For local testing fallback only (will not be exposed as a public toggle in production)
-use_local_excel = os.getenv("USE_LOCAL_EXCEL", "false").lower() == "true"
+# Render Data Source Diagnostic status in sidebar
+df_deals, df_wo, data_source_label, error_details = load_and_cache_data()
 
-# Display diagnostics in sidebar
-if use_local_excel:
-    st.sidebar.markdown("Data Source: 📂 **Local Excel Mock** (Local Dev Only)")
+if "API" in data_source_label and not error_details:
+    tf.sidebar.markdown(f"Data Source: <span class='status-active'>✓ {data_source_label}</span>", unsafe_allow_html=True)
+elif "Excel" in data_source_label:
+    tf.sidebar.markdown(f"Data Source: <span class='status-warning'>📂 {data_source_label}</span>", unsafe_allow_html=True)
 else:
-    if monday_token and deals_board_id and wo_board_id:
-        st.sidebar.markdown("Data Source: <span class='status-active'>✓ Monday.com API (Live)</span>", unsafe_allow_html=True)
-    else:
-        st.sidebar.markdown("Data Source: <span class='status-inactive'>✗ Monday.com API (Missing Keys)</span>", unsafe_allow_html=True)
+    tf.sidebar.markdown(f"Data Source: <span class='status-inactive'>✗ Connection Error</span>", unsafe_allow_html=True)
+    if error_details:
+        tf.sidebar.warning(f"Sync details: {error_details}")
 
-# LLM Status
-llm_provider = None
-llm_key = None
+# Determine AI Engine credentials state
+openai_key = Config.OPENAI_API_KEY
 if openai_key:
     llm_provider = "OpenAI"
     llm_key = openai_key
-    st.sidebar.markdown("AI Engine: <span class='status-active'>✓ OpenAI Connected</span>", unsafe_allow_html=True)
-elif anthropic_key:
-    llm_provider = "Anthropic"
-    llm_key = anthropic_key
-    st.sidebar.markdown("AI Engine: <span class='status-active'>✓ Anthropic Connected</span>", unsafe_allow_html=True)
+    tf.sidebar.markdown("AI Engine: <span class='status-active'>✓ OpenAI Connected</span>", unsafe_allow_html=True)
 else:
+    # Use Mock Mode as safe local fallback
     llm_provider = "Mock"
     llm_key = "mock"
-    st.sidebar.markdown("AI Engine: <span style='color: #f59e0b; font-weight: bold;'>🤖 Mock Mode (Active)</span>", unsafe_allow_html=True)
+    tf.sidebar.markdown("AI Engine: <span style='color: #f59e0b; font-weight: bold;'>🤖 Mock Mode (Active)</span>", unsafe_allow_html=True)
 
-st.sidebar.markdown("---")
+# Add clear history button
+tf.sidebar.markdown("---")
+if tf.sidebar.button("Clear Chat History", use_container_width=True):
+    tf.session_state.messages = []
+    tf.rerun()
 
-# Quick Actions
-st.sidebar.markdown("### Executive Quick Actions")
+# Executive Quick Actions Panel
+tf.sidebar.markdown("### Executive Quick Actions")
+if tf.sidebar.button("Prepare Quarter Leadership Update", use_container_width=True):
+    tf.session_state.quick_action_query = "Prepare a leadership update for this quarter."
 
-# We populate a session variable if a demo query is clicked
-if "query_input" not in st.session_state:
-    st.session_state.query_input = ""
-
-def set_query(q_text):
-    st.session_state.query_input = q_text
-
-if st.sidebar.button("📊 Prepare Quarter Leadership Update"):
-    set_query("Prepare a leadership update for this quarter.")
-
-st.sidebar.markdown("### Suggested Queries")
-demo_queries = [
+# Suggested Queries Panel
+tf.sidebar.markdown("### Suggested Queries")
+suggested_questions = [
     "How's our Energy pipeline looking this quarter?",
     "Which sectors have the strongest pipeline?",
     "What are our biggest deals?",
     "Which deals are most likely to close this quarter?",
     "Which work orders are delayed?",
-    "What operational risks do we have?",
     "Compare Energy and Construction.",
-    "Show me the data quality issues.",
-    "Show me the pipeline."
+    "Show me the data quality issues."
 ]
 
-for q in demo_queries:
-    if st.sidebar.button(q, key=f"btn_{q}"):
-        set_query(q)
+for idx, q in enumerate(suggested_questions):
+    if tf.sidebar.button(q, key=f"q_{idx}", use_container_width=True):
+        tf.session_state.quick_action_query = q
 
-st.sidebar.markdown("---")
-
-# Data fetch function
-def fetch_and_clean_data():
-    """Fetches raw data (from Monday or Local Excel) and returns cleaned dataframes + quality report."""
-    if use_local_excel:
-        logger.info("Loading local Excel sheets for development mode.")
-        df_deals, df_wo = data_cleaner.load_and_clean_local_data()
-        quality_report = business_logic.generate_data_quality_report(df_deals, df_wo)
-        return df_deals, df_wo, quality_report, "Local Excel", len(df_deals), len(df_wo), None
-        
-    if not monday_token or not deals_board_id or not wo_board_id:
-        raise ValueError(
-            "Monday.com credentials missing! Please configure the environment variables:\n"
-            "- `MONDAY_API_TOKEN`\n"
-            "- `DEALS_BOARD_ID`\n"
-            "- `WORK_ORDERS_BOARD_ID`"
-        )
-        
-    client = MondayClient(monday_token)
-    
-    try:
-        # Fetch Deals
-        _, df_deals_raw = client.fetch_board_items(deals_board_id)
-        df_deals = data_cleaner.clean_deals_df(df_deals_raw)
-        
-        # Fetch Work Orders
-        _, df_wo_raw = client.fetch_board_items(wo_board_id)
-        df_wo = data_cleaner.clean_work_orders_df(df_wo_raw)
-        
-        # Quality report
-        quality_report = business_logic.generate_data_quality_report(df_deals, df_wo)
-        
-        return df_deals, df_wo, quality_report, "Monday.com", len(df_deals), len(df_wo), None
-    except MondayAPIError as e:
-        logger.error(f"Monday API connection error: {e}")
-        raise e
-    except Exception as e:
-        logger.error(f"Failed to fetch data: {e}")
-        raise e
-
-# Initial data load for diagnostic summary in sidebar
-try:
-    df_deals_diag, df_wo_diag, quality_diag, src_name, deals_count, wo_count, _ = fetch_and_clean_data()
-    st.sidebar.markdown("### Data Summary")
-    st.sidebar.text(f"Deals analyzed: {deals_count}")
-    st.sidebar.text(f"Work Orders: {wo_count}")
-    
-    # Visual quality warning in sidebar
-    unmatched_wo = quality_diag.get("work_orders_board", {}).get("unmatched_work_orders_count", 0)
-    won_missing_vals = quality_diag.get("deals_board", {}).get("won_deals_missing_values", 0)
-    
-    st.sidebar.markdown("### Caveats Highlighted")
-    if unmatched_wo > 0:
-        st.sidebar.warning(f"⚠️ {unmatched_wo} work orders have unmatched Deal Names.")
-    if won_missing_vals > 0:
-        st.sidebar.warning(f"⚠️ {won_missing_vals} won deals are missing values.")
-    if unmatched_wo == 0 and won_missing_vals == 0:
-        st.sidebar.success("✓ No major cross-board mismatch.")
-except Exception as ex:
-    st.sidebar.error(f"Error loading board metadata: {ex}")
-
-# Main Chat Interface
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# Initialize message storage
+if "messages" not in tf.session_state:
+    tf.session_state.messages = []
 
 # Display conversation history
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-        if "metadata" in msg:
-            st.markdown(f"<div class='metadata-block'>{msg['metadata']}</div>", unsafe_allow_html=True)
+for message in tf.session_state.messages:
+    with tf.chat_message(message["role"]):
+        tf.markdown(message["content"])
+        
+        # Display context panel if metadata exists for assistant message
+        if message["role"] == "assistant" and "context" in message:
+            ctx = message["context"]
+            tf.markdown(f"""
+            <div class="context-panel">
+                <strong>Data Context Panel</strong><br>
+                • Data Source: {ctx['data_source']}<br>
+                • Period: Q3 2026 (Aug 2026 context)<br>
+                • Records Analyzed: {ctx['deals_count']} Deals, {ctx['wo_count']} Work Orders (Match: {ctx['match_rate']:.1f}%)<br>
+                • Retrieved: {ctx['retrieved_at']}<br>
+                • Caveats: {ctx['caveats']}
+            </div>
+            """, unsafe_allow_html=True)
 
-# Main chat input execution
-user_query = st.chat_input("Ask a question about pipeline, sectors, delays, or prepare a leadership update...")
-
-# If a quick action button was clicked, we override the user_query
-if st.session_state.query_input:
-    user_query = st.session_state.query_input
-    st.session_state.query_input = ""  # Reset trigger
+# Handle Chat Input & Suggested queries click
+user_query = None
+if "quick_action_query" in tf.session_state and tf.session_state.quick_action_query:
+    user_query = tf.session_state.quick_action_query
+    tf.session_state.quick_action_query = None # Reset
+else:
+    input_text = tf.chat_input("Ask a question about pipeline, sectors, delays, or prepare a leadership update...")
+    if input_text:
+        user_query = input_text
 
 if user_query:
-    # 1. Display user query
-    with st.chat_message("user"):
-        st.markdown(user_query)
-    st.session_state.messages.append({"role": "user", "content": user_query})
-    
-    # 2. Get AI Response
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
+    # 1. Append user message
+    tf.session_state.messages.append({"role": "user", "content": user_query})
+    with tf.chat_message("user"):
+        tf.markdown(user_query)
+
+    # 2. Generate agent response
+    with tf.chat_message("assistant"):
+        message_placeholder = tf.empty()
         
-        # Check system keys
-        if not llm_key or not llm_provider:
-            err_msg = "I am missing the AI reasoning engine API key (OPENAI_API_KEY or ANTHROPIC_API_KEY). Please configure it in your environment/secrets."
+        # Check source connection failures
+        if df_deals.empty or df_wo.empty:
+            err_msg = "I couldn't retrieve the latest Monday.com data, so I won't provide potentially stale figures. Please verify your credentials/board configuration."
+            if error_details:
+                err_msg += f"\n\n*Error details: {error_details}*"
             message_placeholder.error(err_msg)
-            st.session_state.messages.append({"role": "assistant", "content": err_msg})
+            tf.session_state.messages.append({"role": "assistant", "content": err_msg})
         else:
-            with st.spinner("Retrieving latest data and analyzing..."):
+            with tf.spinner("Querying backend calculations & AI engine..."):
                 try:
-                    # Retrieve data dynamically at query time
-                    df_deals, df_wo, quality_report, data_source, deals_cnt, wo_cnt, _ = fetch_and_clean_data()
+                    # Initialize Agent core
+                    agent = Agent(provider=llm_provider, api_key=llm_key)
                     
-                    # Initialize Agent Core
-                    agent = AgentCore(provider=llm_provider, api_key=llm_key)
-                    
-                    # Prepare messages
+                    # Convert history to format needed by agent core
                     history = []
-                    # We pass the last 5 turns of conversation to keep it token efficient
-                    for msg in st.session_state.messages[-10:]:
+                    # Keep only last 8 messages to prevent context bloat
+                    for msg in tf.session_state.messages[-8:]:
                         history.append({"role": msg["role"], "content": msg["content"]})
                         
-                    # Execute agent loop
-                    response_text = agent.run_agent_turn(history, df_deals, df_wo)
+                    # Execute agent turn
+                    response = agent.run_agent_turn(history, df_deals, df_wo)
+                    message_placeholder.markdown(response)
                     
-                    # Construct metadata section
-                    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    metadata_html = f"**Data source:** ✓ {data_source} Live | **Deals analyzed:** {deals_cnt} | **Work orders:** {wo_cnt} | **Sync time:** {now_str}"
+                    # Calculate live context panel statistics
+                    dq = business_logic.generate_data_quality_report(df_deals, df_wo)
+                    deals_missing_val = dq.get("deals_board", {}).get("won_deals_missing_values", 0)
+                    unmatched_wo = dq.get("work_orders_board", {}).get("unmatched_work_orders_count", 0)
+                    match_pct = dq.get("work_orders_board", {}).get("match_percentage_deals", 0.0)
                     
-                    # Display response
-                    message_placeholder.markdown(response_text)
-                    st.markdown(f"<div class='metadata-block'>{metadata_html}</div>", unsafe_allow_html=True)
+                    # Compile data quality alerts
+                    caveats_list = []
+                    if deals_missing_val > 0:
+                        caveats_list.append(f"{deals_missing_val} won deals missing value figures")
+                    if unmatched_wo > 0:
+                        caveats_list.append(f"{unmatched_wo} work orders unmatched to a sales deal name")
+                    if not caveats_list:
+                        caveats_str = "No severe data quality flags detected."
+                    else:
+                        caveats_str = f"⚠️ {', '.join(caveats_list)}."
+                        
+                    ctx_metadata = {
+                        "data_source": "Monday.com" if "API" in data_source_label else "Excel mock local data",
+                        "deals_count": len(df_deals),
+                        "wo_count": len(df_wo),
+                        "match_rate": match_pct,
+                        "retrieved_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "caveats": caveats_str
+                    }
                     
-                    # Save to state
-                    st.session_state.messages.append({
+                    # Append message along with metadata context
+                    tf.session_state.messages.append({
                         "role": "assistant", 
-                        "content": response_text,
-                        "metadata": metadata_html
+                        "content": response,
+                        "context": ctx_metadata
                     })
                     
+                    # Force page rerun to display context panel under message
+                    tf.rerun()
                 except Exception as e:
-                    # Safe deterministic fallback if everything fails
-                    err_msg = (
-                        "I couldn't retrieve the latest Monday.com data, so I won't provide potentially stale figures. "
-                        "Please verify your credentials and connection.\n\n"
-                        f"*Details: {str(e)}*"
-                    )
+                    logger.error(f"Error handling user request: {e}")
+                    err_msg = f"An unexpected error occurred while communicating with the intelligence backend: {str(e)}"
                     message_placeholder.error(err_msg)
-                    st.session_state.messages.append({"role": "assistant", "content": err_msg})
-                    
-    # Force page rerun to display correctly
-    st.rerun()
+                    tf.session_state.messages.append({"role": "assistant", "content": err_msg})

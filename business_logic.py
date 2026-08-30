@@ -34,11 +34,11 @@ def filter_by_date_range(df: pd.DataFrame, date_col: str, quarter: Optional[int]
         return df
         
     df_filtered = df.copy()
-    # Ensure dates are datetime.date or None
     dates = pd.to_datetime(df_filtered[date_col], errors="coerce")
     
+    mask = pd.Series(True, index=df_filtered.index)
     if year is not None:
-        df_filtered = df_filtered[dates.dt.year == year]
+        mask = mask & (dates.dt.year == year)
         
     if quarter is not None:
         q_months = {
@@ -47,9 +47,9 @@ def filter_by_date_range(df: pd.DataFrame, date_col: str, quarter: Optional[int]
             3: [7, 8, 9],
             4: [10, 11, 12]
         }[quarter]
-        df_filtered = df_filtered[dates.dt.month.isin(q_months)]
+        mask = mask & (dates.dt.month.isin(q_months))
         
-    return df_filtered
+    return df_filtered[mask]
 
 def get_pipeline_summary(df_deals: pd.DataFrame, sector: Optional[str] = None, quarter: Optional[int] = None, year: Optional[int] = None) -> Dict[str, Any]:
     """

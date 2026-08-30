@@ -1,21 +1,20 @@
 import requests
-import pandas as pd
 import logging
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 
 class MondayAPIError(Exception):
-    """Custom exception for Monday.com API failures."""
+    """Custom exception class for Monday.com GraphQL or connection errors."""
     pass
 
 class MondayClient:
-    """Client to interface with monday.com GraphQL API."""
+    """Handles read-only connection and data retrieval from Monday.com GraphQL API."""
     def __init__(self, api_token: str):
         if not api_token:
-            raise ValueError("Monday.com API token must be provided.")
+            raise ValueError("Monday.com API token must be configured.")
         self.api_token = api_token
         self.headers = {
             "Authorization": self.api_token,
@@ -23,38 +22,36 @@ class MondayClient:
             "API-Version": "2023-10"
         }
 
-    def _execute_query(self, query: str, variables: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Execute a GraphQL query against monday.com."""
+    def monday_graphql(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Executes a GraphQL query against the Monday.com API."""
         payload = {"query": query}
         if variables:
             payload["variables"] = variables
             
         try:
-            response = requests.post(MONDAY_API_URL, json=payload, headers=self.headers, timeout=15)
+            response = requests.post(MONDAY_API_URL, json=payload, headers=self.headers, timeout=20)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            logger.error(f"HTTP request to Monday.com failed: {e}")
-            raise MondayAPIError(f"Failed to connect to Monday.com: {e}")
+            logger.error(f"HTTP connection failure to Monday.com: {e}")
+            raise MondayAPIError(f"HTTP request to Monday.com failed: {e}")
 
         result = response.json()
         
-        # Check for GraphQL errors in the response
+        # Check for GraphQL specific errors
         if "errors" in result:
             errors = result["errors"]
-            err_msg = "; ".join([err.get("message", "Unknown error") for err in errors])
+            err_msg = "; ".join([err.get("message", "Unknown GraphQL error") for err in errors])
             logger.error(f"Monday.com GraphQL errors: {err_msg}")
             raise MondayAPIError(f"Monday.com API returned errors: {err_msg}")
-
+            
         return result
 
-    def get_board_columns(self, board_id: str) -> Dict[str, str]:
-        """
-        Fetches the column definitions for a board.
-        Returns a dictionary mapping column_id -> column_title.
-        """
+    def get_board_metadata(self, board_id: str) -> Dict[str, Any]:
+        """Retrieves name and columns definitions for a board."""
         query = """
         query ($boardId: [ID!]) {
           boards (ids: $boardId) {
+            id
             name
             columns {
               id
@@ -65,35 +62,33 @@ class MondayClient:
         }
         """
         variables = {"boardId": [str(board_id)]}
-        result = self._execute_query(query, variables)
-        
+        result = self.monday_graphql(query, variables)
         boards = result.get("data", {}).get("boards", [])
         if not boards:
-            raise MondayAPIError(f"Board with ID {board_id} not found or inaccessible.")
-            
-        columns = boards[0].get("columns", [])
-        column_map = {col["id"]: col["title"] for col in columns}
-        # Explicitly map name to 'name'
-        column_map["name"] = "Name"
-        return column_map
+            raise MondayAPIError(f"Board ID {board_id} not found or is inaccessible.")
+        return boards[0]
 
-    def fetch_board_items(self, board_id: str) -> Tuple[str, pd.DataFrame]:
+    def get_board_columns(self, board_id: str) -> List[Dict[str, str]]:
+        """Returns a list of column definitions for a board, mapping ID, Title, and Type."""
+        metadata = self.get_board_metadata(board_id)
+        return metadata.get("columns", [])
+
+    def get_all_board_items(self, board_id: str) -> Tuple[str, List[Dict[str, Any]]]:
         """
-        Fetches all items from the board, parsing column values.
-        Returns a tuple of (board_name, dataframe).
+        Retrieves all items from a board using cursor-based pagination.
+        Returns a tuple of (board_name, list_of_raw_item_records).
         """
-        # 1. Get column mapping
-        column_map = self.get_board_columns(board_id)
+        # 1. Get Board Metadata
+        metadata = self.get_board_metadata(board_id)
+        board_name = metadata.get("name", "Unknown Board")
         
-        # 2. Query items page-by-page
+        # 2. Iterate through pages using the GraphQL items_page pagination
         items = []
         cursor = None
-        board_name = "Unknown Board"
         
         query_first_page = """
         query ($boardId: [ID!]) {
           boards (ids: $boardId) {
-            name
             items_page (limit: 100) {
               cursor
               items {
@@ -132,21 +127,19 @@ class MondayClient:
         while True:
             if not cursor:
                 variables = {"boardId": [str(board_id)]}
-                result = self._execute_query(query_first_page, variables)
+                result = self.monday_graphql(query_first_page, variables)
                 boards = result.get("data", {}).get("boards", [])
                 if not boards:
-                    raise MondayAPIError(f"Board with ID {board_id} is empty or not found.")
-                board_name = boards[0].get("name", "Unknown Board")
+                    raise MondayAPIError(f"Board {board_name} (ID: {board_id}) is empty or missing.")
                 items_page = boards[0].get("items_page", {})
             else:
                 variables = {"cursor": cursor}
-                result = self._execute_query(query_next_page, variables)
-                # Next page query boards structure can be different, it might return a list of boards
+                result = self.monday_graphql(query_next_page, variables)
                 boards = result.get("data", {}).get("boards", [])
                 if boards:
                     items_page = boards[0].get("items_page", {})
                 else:
-                    # In some API versions, items_page is returned at data.boards[0] or directly
+                    # Alternative structure depending on API query routing
                     items_page = result.get("data", {}).get("items_page", {})
                     
             page_items = items_page.get("items", [])
@@ -155,26 +148,5 @@ class MondayClient:
             cursor = items_page.get("cursor")
             if not cursor:
                 break
-
-        if not items:
-            return board_name, pd.DataFrame()
-
-        # 3. Parse items to a structured list of dicts
-        parsed_records = []
-        for item in items:
-            record = {
-                "item_id": item["id"],
-                "Item Name": item["name"] # This is usually mapped to 'Deal Name' or primary column
-            }
-            
-            # Map column values
-            for val in item.get("column_values", []):
-                col_id = val["id"]
-                col_title = column_map.get(col_id, col_id)
-                col_text = val.get("text")
-                record[col_title] = col_text
                 
-            parsed_records.append(record)
-            
-        df = pd.DataFrame(parsed_records)
-        return board_name, df
+        return board_name, items

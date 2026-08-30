@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# Streamlit config and secrets (Streamlit config should be server-side)
+.streamlit/
+
+# IDE files
+.vscode/
+.idea/
+.gemini/
+
+# System files
+.DS_Store
+Thumbs.db

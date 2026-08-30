@@ -1,9 +1,6 @@
-import json
 import logging
 import datetime
 from typing import List, Dict, Any
-from openai import OpenAI
-from backend.prompts import SYSTEM_PROMPT
 from backend import business_logic
 
 logger = logging.getLogger(__name__)
@@ -28,19 +25,11 @@ def clean_numpy_types(obj: Any) -> Any:
     return obj
 
 class Agent:
-    """Orchestrates LLM interaction, parses tool calls, and returns structured responses."""
-    def __init__(self, provider: str, api_key: Optional[str] = None):
-        self.provider = provider.lower()
-        self.api_key = api_key
-        
-        if self.provider == "openai":
-            if not self.api_key:
-                raise ValueError("OpenAI API Key must be provided for OpenAI mode.")
-            self.client = OpenAI(api_key=self.api_key)
-        elif self.provider == "mock":
-            self.client = None
-        else:
-            raise ValueError(f"Unsupported provider: {provider}")
+    """Orchestrates deterministic business intelligence calculations and returns structured responses."""
+    def __init__(self, provider: str = "mock", api_key: str = None):
+        # Always use deterministic mode — no LLM API dependency
+        self.provider = "mock"
+        self.client = None
 
     def get_tool_definitions(self) -> List[Dict[str, Any]]:
         """Defines JSON schemas for the tools available to the LLM agent."""
@@ -169,73 +158,9 @@ class Agent:
             logger.error(f"Failed to execute tool {name}: {e}")
             return {"error": f"Internal execution error: {str(e)}"}
 
-    def run_agent_turn(self, conversation_history: List[Dict[str, str]], df_deals: pd.DataFrame, df_wo: pd.DataFrame) -> str:
-        """Executes a single chatbot response loop, invoking tools recursively."""
-        if self.provider == "mock":
-            return self._run_mock_turn(conversation_history, df_deals, df_wo)
-            
-        # Convert tools schema to OpenAI schema
-        openai_tools = []
-        for t in self.get_tool_definitions():
-            openai_tools.append({
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t["description"],
-                    "parameters": t["parameters"]
-                }
-            })
-
-        # Inject temporal system context relative to today's date
-        today = datetime.date.today()
-        current_q = (today.month - 1) // 3 + 1
-        current_y = today.year
-        
-        system_instructions = SYSTEM_PROMPT + f"\nSystem context: Today is {today.isoformat()}. The current calendar quarter is Q{current_q} {current_y}."
-        
-        messages = [{"role": "system", "content": system_instructions}]
-        for msg in conversation_history:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-
-        max_iterations = 5
-        for _ in range(max_iterations):
-            try:
-                response = self.client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    tools=openai_tools,
-                    tool_choice="auto",
-                    temperature=0.0
-                )
-            except Exception as e:
-                logger.error(f"OpenAI completion request failure: {e}")
-                # Fall back to deterministic calculations output
-                logger.info("Falling back to deterministic mock response due to OpenAI API exception.")
-                deterministic_response = self._run_mock_turn(conversation_history, df_deals, df_wo)
-                return f"⚠️ **AI Engine connection failed (Error: {str(e)}). Displaying deterministic Python calculations fallback:**\n\n" + deterministic_response
-
-            response_message = response.choices[0].message
-            messages.append(response_message)
-
-            if not response_message.tool_calls:
-                return response_message.content if response_message.content else ""
-
-            # Resolve function calling
-            for tool_call in response_message.tool_calls:
-                name = tool_call.function.name
-                args = json.loads(tool_call.function.arguments)
-                
-                logger.info(f"LLM invokes tool '{name}' with variables: {args}")
-                result = self._execute_tool(name, args, df_deals, df_wo)
-                
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "name": name,
-                    "content": json.dumps(result)
-                })
-
-        return "Error: Agent exceeded maximum tool invocation iterations."
+    def run_agent_turn(self, conversation_history: List[Dict[str, str]], df_deals, df_wo) -> str:
+        """Executes a single response turn using deterministic Python calculations."""
+        return self._run_mock_turn(conversation_history, df_deals, df_wo)
 
     def _run_mock_turn(self, conversation_history: List[Dict[str, str]], df_deals: pd.DataFrame, df_wo: pd.DataFrame) -> str:
         """Fallback tool execution when keys are missing, bypassing LLM API costs."""

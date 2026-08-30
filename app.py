@@ -207,17 +207,10 @@ else:
     if error_details:
         tf.sidebar.warning(f"Sync details: {error_details}")
 
-# Determine AI Engine credentials state
-openai_key = Config.OPENAI_API_KEY
-if openai_key:
-    llm_provider = "OpenAI"
-    llm_key = openai_key
-    tf.sidebar.markdown("AI Engine: <span class='status-active'>✓ OpenAI Connected</span>", unsafe_allow_html=True)
-else:
-    # Use Mock Mode as safe local fallback
-    llm_provider = "Mock"
-    llm_key = "mock"
-    tf.sidebar.markdown("AI Engine: <span style='color: #f59e0b; font-weight: bold;'>🤖 Mock Mode (Active)</span>", unsafe_allow_html=True)
+# Analytics engine is always active (deterministic mode)
+tf.sidebar.markdown("AI Engine: <span class='status-active'>✓ Analytics Engine Active</span>", unsafe_allow_html=True)
+llm_provider = "mock"
+llm_key = "mock"
 
 # Add clear history button
 tf.sidebar.markdown("---")

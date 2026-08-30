@@ -254,21 +254,28 @@ class Agent:
 
         # 2. Leadership update
         if "leadership update" in query:
-            pipe = business_logic.get_pipeline_summary(df_deals, quarter=3, year=2026)
+            pipe_overall = business_logic.get_pipeline_summary(df_deals)
+            pipe_q3 = business_logic.get_pipeline_summary(df_deals, quarter=3, year=2026)
             ops = business_logic.get_operational_summary(df_wo)
             dq = business_logic.generate_data_quality_report(df_deals, df_wo)
-            p_metrics = pipe.get("open_deals", {})
+            
+            p_overall = pipe_overall.get("open_deals", {})
+            p_q3 = pipe_q3.get("open_deals", {})
+            won_overall = pipe_overall.get("won_deals", {})
+            won_q3 = pipe_q3.get("won_deals", {})
             
             return f"""# Executive Update — Q3 2026
 
 ## Headline
-**Commercial bookings remain strong with {f_curr(p_metrics.get('total_value', 0))} open pipeline, but collections efficiency requires attention due to delayed work orders.**
+**Commercial bookings remain strong with {f_curr(p_overall.get('total_value', 0))} in overall active open pipeline, though no deals are currently scheduled to close in the current Q3 2026 quarter.**
 
 ## Commercial
-- **Open Pipeline**: {f_curr(p_metrics.get('total_value', 0))} across **{p_metrics.get('count', 0)} open deals**.
-- **Weighted Pipeline**: {f_curr(p_metrics.get('weighted_value', 0))} (based on stage probabilities).
-- **Average Deal Size**: {f_curr(p_metrics.get('average_size', 0))}.
-- **Won Deals this Quarter**: {f_curr(pipe.get('won_deals', {}).get('total_value', 0))} across **{pipe.get('won_deals', {}).get('count', 0)} closed won deals**.
+- **Open Pipeline (Overall)**: {f_curr(p_overall.get('total_value', 0))} across **{p_overall.get('count', 0)} open deals**.
+- **Open Pipeline (Q3 2026)**: {f_curr(p_q3.get('total_value', 0))} across **{p_q3.get('count', 0)} open deals**.
+- **Weighted Pipeline (Overall)**: {f_curr(p_overall.get('weighted_value', 0))} (based on stage probabilities).
+- **Average Deal Size (Overall)**: {f_curr(p_overall.get('average_size', 0))}.
+- **Won Deals (Overall)**: {f_curr(won_overall.get('total_value', 0))} across **{won_overall.get('count', 0)} closed won deals**.
+- **Won Deals (Q3 2026)**: {f_curr(won_q3.get('total_value', 0))} across **{won_q3.get('count', 0)} closed won deals**.
 
 ## Sector Performance
 - **Mining** and **Renewables** remain the largest sectors contributing to bookings.
@@ -282,7 +289,7 @@ class Agent:
 
 ## Risks
 - **Collection Delays**: {ops.get('delayed_work_orders', {}).get('count', 0)} work orders are currently flagged as delayed, representing **{f_curr(ops.get('delayed_work_orders', {}).get('total_receivable', 0))} in receivables**.
-- **Missing Deal Values**: {pipe.get('won_deals', {}).get('missing_values_count', 0)} won deals this quarter are missing financial values in Monday.com.
+- **Missing Deal Values**: {pipe_overall.get('won_deals', {}).get('missing_values_count', 0)} won deals overall are missing financial values in Monday.com.
 
 ## Opportunities
 - High-probability pipeline closing soon represents a significant opportunity. Focusing sales teams on closing SQL stage deals could unlock immediate revenue.
@@ -299,27 +306,33 @@ class Agent:
 
         # 3. Energy Pipeline
         if "energy" in query:
-            metrics = business_logic.get_pipeline_summary(df_deals, sector="Renewables", quarter=3, year=2026)
-            p_metrics = metrics.get("open_deals", {})
-            won_metrics = metrics.get("won_deals", {})
+            metrics_overall = business_logic.get_pipeline_summary(df_deals, sector="Renewables")
+            metrics_q3 = business_logic.get_pipeline_summary(df_deals, sector="Renewables", quarter=3, year=2026)
+            
+            p_overall = metrics_overall.get("open_deals", {})
+            p_q3 = metrics_q3.get("open_deals", {})
+            won_overall = metrics_overall.get("won_deals", {})
+            won_q3 = metrics_q3.get("won_deals", {})
             
             return f"""## Energy/Renewables Pipeline — Q3 2026
 
-**{f_curr(p_metrics.get('total_value', 0))} open pipeline across {p_metrics.get('count', 0)} deals**
+**{f_curr(p_overall.get('total_value', 0))} overall open pipeline across {p_overall.get('count', 0)} deals** (no deals closing in Q3 2026)
 
 ### Key metrics
-- **Total Pipeline**: {f_curr(p_metrics.get('total_value', 0))}
-- **Weighted Pipeline**: {f_curr(p_metrics.get('weighted_value', 0))}
-- **Average Deal Size**: {f_curr(p_metrics.get('average_size', 0))}
-- **Won Deals this Quarter**: {f_curr(won_metrics.get('total_value', 0))} ({won_metrics.get('count', 0)} won)
+- **Total Pipeline (Overall)**: {f_curr(p_overall.get('total_value', 0))}
+- **Total Pipeline (Q3 2026)**: {f_curr(p_q3.get('total_value', 0))}
+- **Weighted Pipeline (Overall)**: {f_curr(p_overall.get('weighted_value', 0))}
+- **Average Deal Size**: {f_curr(p_overall.get('average_size', 0))}
+- **Won Deals (Overall)**: {f_curr(won_overall.get('total_value', 0))} ({won_overall.get('count', 0)} won)
+- **Won Deals (Q3 2026)**: {f_curr(won_q3.get('total_value', 0))} ({won_q3.get('count', 0)} won)
 
 ### What stands out
 - Renewable energy represents one of our most active sectors with strong commercial velocity.
-- The average deal size of {f_curr(p_metrics.get('average_size', 0))} indicates enterprise-grade opportunities.
+- The average deal size of {f_curr(p_overall.get('average_size', 0))} indicates enterprise-grade opportunities.
 
 ### Risks / Caveats
-- **Data Quality**: {p_metrics.get('missing_values_count', 0)} open deals are missing value figures.
-- **Won Caveat**: {won_metrics.get('missing_values_count', 0)} won deals in this sector are missing values.
+- **Data Quality**: {p_overall.get('missing_values_count', 0)} open deals are missing value figures.
+- **Won Caveat**: {won_overall.get('missing_values_count', 0)} won deals in this sector are missing values.
 
 ### Management Attention
 1. Follow up on high-value proposals currently in negotiation.

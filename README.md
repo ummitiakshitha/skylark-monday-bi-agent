@@ -3,166 +3,164 @@
 Live Demo: `[[LIVE_DEMO_URL_PLACEHOLDER]]`
 GitHub: `[[GITHUB_REPO_URL_PLACEHOLDER]]`
 
-An agentic business intelligence chat application that queries **Monday.com Work Orders & Deals** live via the Monday.com GraphQL API to answer founder-level queries, audit data quality, and generate structured executive leadership updates.
+An enterprise-grade, conversational Business Intelligence Agent for Skylark Drones that queries **Monday.com Deals & Work Orders** live via the Monday.com GraphQL API to answer founder-level queries, audit data quality, and generate structured executive leadership updates.
 
 ---
 
 ## 1. Problem Interpretation & Solution Architecture
 
-Founders and executives need quick, accurate business intelligence answers based on live operational data. However, real-world data is messy, incomplete, and distributed across different boards. 
+Founders and executives require real-time, accurate business intelligence answers based on sales deals and operational deliveries. However, raw data is distributed across multiple boards and contains inconsistencies, missing values, and template rows. 
 
-Our solution provides a **Conversational BI Agent** powered by an LLM reasoning engine, integrated with a **Deterministic Calculation Layer** written in Python. This guarantees that all metrics, averages, and collections are computed with 100% mathematical accuracy (eliminating LLM hallucinations), while the LLM maps natural queries to tools and translates structured analysis into executive takeaways.
+Our solution provides a **Conversational BI Agent** powered by an LLM reasoning engine, integrated with a **Deterministic Calculation Layer** in Python. This ensures that all metric calculations, sums, averages, and collections rates are computed with 100% mathematical accuracy in Python (avoiding LLM hallucinations), while the LLM acts as the routing orchestrator mapping user queries to python tools and translating tabular data into summaries.
 
-### High-Level Architecture
+### Architecture Data Flow
 ```
-                   +------------------------+
-                   |  Streamlit Chat UI     |
-                   +-----------+------------+
-                               |
-                               v (Query time)
-                   +-----------+------------+
-                   |   Monday.com GraphQL   |
-                   +-----------+------------+
-                               |
-                               v (Fetch items & columns)
-                   +-----------+------------+
-                   |   Data Cleaning Layer  | (data_cleaner.py)
-                   +-----------+------------+
-                               |
-                               v (Standardized DataFrames)
-  +----------------------------+----------------------------+
-  |                                                         |
-  v (Runs LLM loop)                                         v (Executes tools)
-+------------------------+  Tool Calls    +----------------------------+
-|      Agent Core        +--------------->+  Deterministic Analytics   | (business_logic.py)
-| (OpenAI/Anthropic tool) <---------------+  (Python GroupBy/Sums)     |
-+------------------------+  Tool Results  +----------------------------+
+                 USER
+                   ↓
+            STREAMLIT FRONTEND (app.py)
+                   ↓
+         BACKEND AGENT (backend/agent.py)
+                   ↓
+        ┌──────────┴──────────┐
+        ↓                     ↓
+ MONDAY API CLIENT       AI TOOL LOGIC
+(backend/monday_client.py) (backend/prompts.py)
+        ↓                     ↓
+ Deals + Work Orders    Deterministic BI (backend/business_logic.py)
+        ↓                     ↓
+        └──────────┬──────────┘
+                   ↓
+            DATA QUALITY (backend/data_cleaner.py)
+                   ↓
+          AI EXPLANATION
+                   ↓
+           FOUNDER RESPONSE
 ```
 
 ---
 
-## 2. Project Structure
+## 2. Project Directory Structure
+
+The project strictly separates concerns between the User Interface and Application logic:
 
 ```
-d:\skylarkdrones\
-├── .gitignore             # Git ignore definitions
-├── requirements.txt       # App dependencies
-├── discover_boards.py     # Script to list Monday.com board IDs
-├── monday_client.py       # Monday.com GraphQL API interface
-├── data_cleaner.py        # Schema mapping and data normalization layer
-├── business_logic.py      # Deterministic business and financial logic (Python)
-├── agent_core.py          # AI Agent prompt, tools, and LLM runner
-├── app.py                 # Streamlit chat interface and dashboard
-├── test_agent.py          # Unit tests (cleaning, sorting, filtering)
-├── test_e2e_mock.py      # E2E conversational flow mock tests
-├── README.md              # Setup and architecture documentation
-└── DECISION_LOG.md        # Log of architectural decisions and trade-offs
+skylark-bi-agent/
+│
+├── app.py                         # FRONTEND / Streamlit UI Dashboard
+│
+├── backend/                       # BACKEND Python Modules
+│   ├── __init__.py
+│   ├── config.py                  # Securely loads environment / secrets
+│   ├── monday_client.py           # Monday.com GraphQL API connection client
+│   ├── schema_mapper.py           # Translates raw column IDs to canonical schema
+│   ├── data_cleaner.py            # Normalizes texts, sectors, dates, and probabilities
+│   ├── business_logic.py          # Deterministic Python BI calculations
+│   ├── prompts.py                 # System prompts for the AI Agent
+│   └── agent.py                   # LLM agent orchestrator & tool executor
+│
+├── tests/                         # Automated unit & integration tests
+│   ├── test_data_cleaner.py
+│   ├── test_business_logic.py
+│   ├── test_schema_mapper.py
+│   └── test_join_logic.py
+│
+├── local_data/                    # Mock Excel spreadsheets for dev tests only
+│   ├── Deal funnel Data.xlsx
+│   └── Work_Order_Tracker Data.xlsx
+│
+├── screenshots/                   # Verification screenshots
+│   ├── 01-home.png
+│   ├── 02-energy-pipeline.png
+│   ├── 03-cross-board.png
+│   └── 04-leadership-update.png
+│
+├── discover_boards.py             # Script to list Monday.com board IDs
+├── requirements.txt               # App dependencies
+├── .env.example                   # Template env config
+├── .gitignore                     # Git exclusions
+├── README.md                      # Setup and architecture guide
+└── DECISION_LOG.md                # Architectural design log
 ```
 
 ---
 
-## 3. Tech Stack
+## 3. Monday.com Integration & GraphQL Setup
 
-- **Core**: Python 3.10+
-- **Frontend / Dashboard**: Streamlit (fast, responsive chat elements, secure sidebar)
-- **Data Manipulation**: Pandas & OpenPyXL
-- **Monday.com Interface**: GraphQL API `https://api.monday.com/v2` via `requests`
-- **Reasoning Engine**: GPT-4o or Claude 3.5 Sonnet (supports function calling)
+The production application queries Monday.com dynamically using the **GraphQL API v2** at `https://api.monday.com/v2`.
+
+### Dynamic Schema Discovery
+Monday.com generates dynamic IDs for custom columns (e.g., `text3`, `numbers2`). To prevent breaking the application, our client implements a robust **two-step schema mapping** in `backend/schema_mapper.py`:
+1. **Dynamic Mapping**: Queries the board's columns metadata (`boards { columns { id title type } }`) to map active column IDs to user-configured titles (e.g., mapping `numbers2` to "Masked Deal value").
+2. **Canonical Mapping**: Translates user-visible headers to standardized `snake_case` internal fields (e.g., "Masked Deal value" $\rightarrow$ `deal_value`).
+
+### Pagination
+Monday.com boards can contain hundreds of rows. The client implements recursive cursor-based pagination utilizing `items_page (limit: 100, cursor: $cursor)` in `backend/monday_client.py` to guarantee that all items are retrieved rather than only the first page.
 
 ---
 
-## 4. Setup & Configurations
+## 4. Normalization & Data Cleaning
 
-### Monday.com Board Setup
-1. Log in to your Monday.com account.
-2. Create two boards: **Deals** and **Work Orders**.
-3. Import the corresponding Excel files (`Deal funnel Data.xlsx` and `Work_Order_Tracker Data.xlsx`) to populate them.
-4. Obtain your Personal API token from **Avatar -> Developer -> My Development Tokens**.
+Data cleaning is handled inside `backend/data_cleaner.py`:
+- **Text & Status Fields**: Strips whitespaces and standardizes text strings. Nulls are mapped to `None`.
+- **Sectors**: Case-insensitive alignment maps variations (e.g., `"mining "` and `"Mining"`) to canonical titles like `"Mining"`. Acronyms like `"dsp"` are capitalized as `"DSP"`.
+- **Status Probabilities**: Translates Deal closure probabilities into float constants (`High` $\rightarrow$ `0.8`, `Medium` $\rightarrow$ `0.5`, `Low` $\rightarrow$ `0.2`, `Won` $\rightarrow$ `1.0`, `Dead` $\rightarrow$ `0.0`, default Open $\rightarrow$ `0.3`).
+- **Nezuko/Bugs Bunny Filters**: Filters out duplicate header rows that are recorded as value rows in the raw datasets.
 
-### Board ID Discovery
-Once you have the API token, run:
+---
+
+## 5. Cross-Board Join Strategy
+The client joins sales information (Deals) with delivery information (Work Orders) by matching the normalized `deal_name` (lowercase, whitespace-trimmed) from both boards. 
+
+**Empirical Match Rate**: Analysis of the raw Excel sheets confirms an **89.66% match rate** (52 of 58 unique work orders successfully link back to a Sales Deal). Mismatched work orders are logged in the Data Quality report.
+
+---
+
+## 6. Business Logic & Calculations
+Calculations in `backend/business_logic.py` are executed in pure Python/Pandas:
+- **Weighted Pipeline**: Computed as $\sum (\text{deal\_value} \times \text{probability})$.
+- **Collection Rate**: Calculated as $\frac{\text{Collected Amount}}{\text{Billed Value}} \times 100$ and $\frac{\text{Collected Amount}}{\text{Won Bookings}} \times 100$ per sector.
+- **Delayed Work Orders**: Active work orders (not Completed) where the target execution date (`probable_end_date`) is in the past, or whose execution status is stalled (e.g., "Pause / struck").
+
+---
+
+## 7. Data Quality Audit & Caveats
+The application generates a live data quality report summarizing:
+- Total records.
+- Missing values count (e.g. won deals missing values).
+- Cross-board mismatches.
+
+These metrics are dynamically displayed to the founder in a context panel under the chat response to ensure complete transparency of data health.
+
+---
+
+## 8. Security & Credentials Setup
+
+The application reads secrets from environment variables (local `.env` file or Streamlit Secrets):
+- `MONDAY_API_TOKEN` - Monday.com Developer API Token
+- `DEALS_BOARD_ID` - Monday.com Deals Board ID
+- `WORK_ORDERS_BOARD_ID` - Monday.com Work Orders Board ID
+- `OPENAI_API_KEY` - OpenAI API Key
+- `OPENAI_MODEL` - Defaults to `"gpt-4o"`
+
+Create a local `.env` file from the template:
 ```bash
-export MONDAY_API_TOKEN="your_personal_token"
-python discover_boards.py
-```
-This lists all board IDs. Note down the IDs for the **Deals** and **Work Orders** boards.
-
-### Authentication & Environment Variables
-Create a `.env` file in the project root for local development (this file is ignored by git):
-```ini
-MONDAY_API_TOKEN=your_monday_token_here
-DEALS_BOARD_ID=your_deals_board_id_here
-WORK_ORDERS_BOARD_ID=your_work_orders_board_id_here
-OPENAI_API_KEY=your_openai_key_here
-# OR
-ANTHROPIC_API_KEY=your_anthropic_key_here
+cp .env.example .env
+# Edit .env to add your keys
 ```
 
 ---
 
-## 5. Schema Mapping & Data Normalization
+## 9. Local Setup & Verification
 
-On Monday.com, column IDs are generated dynamically (e.g., `text7`, `numbers2`). To prevent breaking the application, our client implements a robust **two-step schema mapping**:
-1. **Dynamic Columns Mapping**: Queries the board's metadata (`columns { id title type }`) to map column IDs to user-configured titles (e.g. mapping `text7` to "Close Date (A)").
-2. **Canonical Mapping**: Translates user-visible headers to standardized `snake_case` keys internally (e.g. "Close Date (A)" $\rightarrow$ `actual_close_date`).
-
-### Normalizations Performed
-- **Date Columns**: Coerced to standard Python `datetime.date` using `pd.to_datetime(errors='coerce')` to gracefully handle empty values and varying string formats.
-- **Sectors**: Strip whitespace, lowercase, and align values (e.g. mapping `"mining "` and `"Mining"` to `"Mining"`). Acronyms like `"dsp"` are capitalized as `"DSP"`.
-- **Status Fields**: Strip whitespace and map empty/null values to `"Unknown"`.
-- **Garbage Row Filter**: Identifies and removes template/junk header rows that duplicate headers as value rows (e.g. `Nezuko` or `Bugs Bunny` rows).
-
----
-
-## 6. Business Calculations & Calculations Layer
-
-All metrics are computed in `business_logic.py` in pure Python, returning structures to the LLM.
-- **Overall Pipeline**: Sum of deal values where `deal_status` is "Open".
-- **Weighted Pipeline**: Sum of `deal_value * calculated_probability`.
-- **Calculated Probability Rules**:
-  - `Won` Deals $\rightarrow$ `1.0` (100%)
-  - `Dead` Deals $\rightarrow$ `0.0` (0%)
-  - `Open` Deals $\rightarrow$ Mapping `High` to `0.8`, `Medium` to `0.5`, `Low` to `0.2`. If missing, falls back to `0.3` (30%) or `0.2` if `On Hold`.
-- **Cross-Board Join**: Left-joins Work Orders and Deals on `deal_name` (trimmed and lowercase). Calculates sector-level collection efficiency: `Collected Value / Billed Value` and `Collected Value / Contract Value`.
-
----
-
-## 7. Agent & Tool Architecture
-
-The LLM (GPT-4o or Claude 3.5 Sonnet) acts as the reasoning coordinator. It is bound to high-level **business-oriented tools**:
-- `get_pipeline_summary`: Computes overall metrics, filters by sector/quarter.
-- `get_pipeline_by_sector`: Returns sector rankings.
-- `get_top_deals`: Returns top deals by value.
-- `get_delayed_work_orders`: Lists overdue and stalled deliveries.
-- `get_data_quality_report`: Statistics on missing fields.
-- `get_revenue_and_collections`: Compares won contract bookings vs collections.
-
-### Ambiguity and Date Handling
-- **Ambiguous Queries**: If a user asks "show me the pipeline," the agent requests clarification: *"Do you want the overall current pipeline, a specific sector, or a stage breakdown?"*
-- **Relative Quarters**: Resolves "this quarter" to Q3 2026 based on the system date (August 2026).
-
----
-
-## 8. Data-Quality Transparency & Error Handling
-
-- **Structured Auditing**: The data quality report exposes exact metrics (e.g. "101 out of 165 won deals are missing values"). If a user asks about won pipeline, the agent surfaces these warnings dynamically.
-- **Fail-Safe Fallbacks**: If Monday.com is offline or credentials fail, the application displays a clear warning: *"I couldn't retrieve the latest Monday.com data, so I won't provide potentially stale figures. Please verify your credentials."*
-
----
-
-## 9. Local Setup & Testing
-
-1. Clone this repository.
-2. Install dependencies:
+1. Install requirements:
    ```bash
    pip install -r requirements.txt
    ```
-3. Run the unit and E2E mock tests:
+2. Run automated test suites:
    ```bash
-   python -m unittest test_agent.py
-   python -m unittest test_e2e_mock.py
+   python -m unittest discover -s tests
    ```
-4. Start the local Streamlit application in development mode:
+3. Run Streamlit locally in development mode (reads from Excel mock files):
    ```bash
    export USE_LOCAL_EXCEL="true"
    streamlit run app.py
@@ -170,19 +168,15 @@ The LLM (GPT-4o or Claude 3.5 Sonnet) acts as the reasoning coordinator. It is b
 
 ---
 
-## 10. Deployment
+## 10. Deployment to Streamlit Cloud
 
-To deploy to **Streamlit Community Cloud**:
-1. Push this clean git repository to GitHub.
-2. Log in to [Streamlit Community Cloud](https://share.streamlit.io/).
-3. Connect your repository and select `app.py` as the entry point.
-4. Under **App Settings -> Secrets**, enter your production API credentials:
+1. Commit and push the clean repository to GitHub.
+2. Link the repository to your [Streamlit Community Cloud](https://share.streamlit.io/) account.
+3. Under **App Settings -> Secrets**, paste the keys:
    ```toml
-   MONDAY_API_TOKEN = "your_production_token"
-   DEALS_BOARD_ID = "your_deals_board_id"
-   WORK_ORDERS_BOARD_ID = "your_work_orders_board_id"
-   OPENAI_API_KEY = "your_openai_api_key"
-   # OR
-   # ANTHROPIC_API_KEY = "your_anthropic_api_key"
+   MONDAY_API_TOKEN = "your_token"
+   DEALS_BOARD_ID = "your_deals_id"
+   WORK_ORDERS_BOARD_ID = "your_orders_id"
+   OPENAI_API_KEY = "your_openai_key"
    ```
-5. Click deploy. The app will launch with a public URL, querying Monday.com live with zero configuration required from the evaluator.
+4. Click **Deploy**. The app will run publicly, querying Monday.com live at runtime with zero configurations required from the evaluator.

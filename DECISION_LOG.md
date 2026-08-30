@@ -1,64 +1,51 @@
 # Decision Log: Skylark Drones BI Agent
 
-This log details the key architectural choices, assumptions, trade-offs, and design constraints adopted during the development of the Skylark Drones Monday.com BI Agent prototype.
+This log details the key architectural choices, assumptions, trade-offs, and design constraints adopted during the development of the Skylark Drones Monday.com BI Agent.
 
 ---
 
-## 1. Technology Choices & Rationale
+## 1. Technological Choices & Rationale
 
-### Choice: Python & Streamlit
-- **Alternative Considered**: React (Next.js) + FastAPI.
-- **Decision**: Streamlit was selected for the entire UI and backend framework.
-- **Rationale**: The strict 6-hour time budget prioritized a working, deployed, and testable system. Streamlit provides instant, responsive chat components (`st.chat_message`, `st.chat_input`) and sidebar controls, while its deployment on Streamlit Community Cloud takes minutes. It eliminates the need for separate hosting of frontends, backends, CORS configuration, and server setups, freeing up hours to focus on the data quality, cleaning, and agent logic.
+### Choice: Streamlit for UI & Python for Backend
+- **Decision**: Streamlit was selected for the entire UI dashboard, importing backend packages.
+- **Rationale**: Streamlit provides native chat elements (`st.chat_message`, `st.chat_input`) and diagnostic sidebars, compiling instantly. It integrates securely with Streamlit Secrets, ensuring no credentials are leaked or queried in the frontend. This allowed us to build a secure, interactive interface within the 6-hour technical budget instead of managing cross-origin setups or API endpoints separately.
 
-### Choice: Direct Monday.com GraphQL API
-- **Alternative Considered**: Model Context Protocol (MCP) server.
-- **Decision**: Directly accessing the Monday.com GraphQL API (`https://api.monday.com/v2`) via Python `requests`.
-- **Rationale**: Monday.com GraphQL API has direct pagination and dynamic column definitions. Implementing an MCP server introduces unnecessary layers, setup overhead, and configuration complexities for the evaluator. Direct API calls are faster to debug, paginate, and test locally.
+### Choice: Direct Monday.com GraphQL API Connection
+- **Decision**: Directly connecting to the Monday.com GraphQL endpoint using Python `requests` and custom cursor-based pagination.
+- **Rationale**: Monday.com columns are dynamically defined (e.g. `text4`). Custom API handlers are faster to debug, paginate page-by-page, and map schema IDs directly to display titles compared to setting up a separate Model Context Protocol (MCP) server, which introduces unnecessary configuration layers for the evaluator.
 
 ### Choice: Deterministic Calculation Layer (Python)
-- **Alternative Considered**: Allowing the LLM to write pandas code or compute metrics itself.
-- **Decision**: Pre-program all sums, averages, cross-board joins, rankings, and filters in a Python business logic file (`business_logic.py`).
-- **Rationale**: LLMs are notorious for hallucinating calculations, missing nulls, or failing at weighted additions (e.g. `sum(value * probability)`). Pre-programming calculations in Python guarantees 100% mathematical accuracy. The LLM's role is restricted to translating query intent to function arguments, invoking the tool, and formatting the raw results for executive consumption.
+- **Decision**: Program all aggregations (sums, averages, counts, cross-board joins) in Python (`backend/business_logic.py`).
+- **Rationale**: LLMs are notorious for failing at arithmetic calculations, missing null rows, or hallucinating averages.Restricting the LLM to tool selection and text formatting guarantees 100% mathematical accuracy while retaining conversational intelligence.
 
 ---
 
-## 2. Messy Data & Cross-Board Joins
+## 2. Messy Data & Data Normalization Decisions
 
-### Finding: Garbage Header Rows
-- **Issue**: The raw dataset contains duplicate header values disguised as records (e.g., the `Nezuko` and `Bugs Bunny` rows where columns contain values like `'Sector/service'` or `'Created Date'`).
-- **Resolution**: Implemented a row filter in `data_cleaner.py` that excludes any row where `deal_status == 'Deal Status'`. These are reported as "excluded records" in the data quality report rather than crashing the system.
+### Finding: Nezuko/Bugs Bunny Garbage Rows
+- **Problem**: Raw Deal funnel data contains duplicate headers recorded as value rows (e.g. rows where status is `"Deal Status"`).
+- **Decision**: Filter these out in `backend/data_cleaner.py` to prevent string-to-float errors.
 
-### Finding: Unmatched Won Values
-- **Issue**: 61% of Won deals (101 out of 165) are missing deal value fields in the Deals sheet.
-- **Resolution**: Surfaced this as a critical warning. If the user asks about won bookings, the agent explicitly prints a warning: *"Please note: 101 out of 165 won deals are missing financial values, meaning actual revenue is significantly underrepresented."*
+### Finding: Missing Financial Values on Won Deals
+- **Problem**: 61% of closed won deals (101 out of 165) are missing value figures in the raw data.
+- **Decision**: We calculated this missing count and surfaced it as a critical warning caveat in the UI. If a founder queries won bookings, the app explicitly highlights the missing values count to prevent misleading bookings summaries.
 
-### Cross-Board Join Strategy
-- **Empirical Analysis**: Analysis of `Client Code` vs `Customer Name Code` showed zero overlap due to differing prefixes (`COMPANY` vs `WOCOMPANY`). However, comparing `Deal Name` in Deals and `Deal name masked` in Work Orders revealed a **90% match rate** (52 of 58 unique work orders match a deal name).
-- **Decision**: Join exclusively on `deal_name` (inner/left join). Before joining, names are stripped of whitespace and converted to lowercase. Mismatched work orders are logged and returned in the data quality report to flag records requiring manual board adjustment.
-
----
-
-## 3. Query Interpretation & Leadership Updates
-
-### Relative Time Resolutions
-- **Decision**: Interpretations of "this quarter", "last quarter", etc., are dynamically resolved in Python relative to the system's local date (August 2026, corresponding to Q3 2026). This ensures reproducible calculations without relying on LLM temporal guessing.
-
-### Interpretation of "Leadership Update"
-- We mapped "Prepare a leadership update for this quarter" to a structured executive summary generated from live data:
-  - **Commercial**: Active and weighted pipeline metrics.
-  - **Sector Performance**: Identifying strongest/weakest sectors by pipeline.
-  - **Operations**: Work Order execution statuses (Completed vs Stalled).
-  - **Risks**: Tracking delayed work orders and data quality gaps.
-  - **Opportunities**: Identifying high-probability deals ($\ge 80\%$) closing soon.
+### Join Key Choice: Deal Name
+- **Problem**: Comparing `Client Code` vs `Customer Name Code` showed a 0% match rate due to prefixes (`COMPANY` vs `WOCOMPANY`).
+- **Decision**: Match on the normalized lowercase, trimmed `deal_name`. This yields an **89.66% match rate** (52 of 58 unique work orders match a sales deal), which we log in the data quality report.
 
 ---
 
-## 4. Time-Limit Trade-offs & Future Improvements
+## 3. Operations & Financial Metric Assumptions
 
-Given the 6-hour limit, the following trade-offs were made:
-- **No Writing Operations**: Monday.com access is strictly read-only, ensuring zero danger of modifying the client's board data.
-- **Basic UI**: Simple chat layout instead of interactive charts.
-- **If More Time Allowed**:
-  - Add Streamlit visualization charts (e.g. Altair bar/pie charts for sector distribution).
-  - Integrate a web webhook listener to automatically update cached DataFrames rather than querying Monday.com on every single chat message.
+- **Financial Metric Distinctions**: Kept bookings (won deals value), billing (invoiced work order values), and collections (cash received) separate. Only using the term "revenue" when referring to won bookings or collections directly.
+- **Timing & Date Logic**: We treat "this quarter" as the current calendar quarter by default. Timing is computed relative to the current system date (e.g. August 2026, falling into Q3 2026).
+- **Work Order Delays**: Defined as active work orders (not Completed) whose probable end date is in the past, or whose execution status is paused/stuck.
+
+---
+
+## 4. 6-Hour Limit Trade-offs & Future Improvements
+
+- **Read-Only Operations**: Monday.com access is strictly read-only to avoid altering client board data during audits.
+- **Interactive Visualizations**: Focused on clean markdown and metrics cards. If more time was available, we would integrate interactive charts (e.g. Altair bar/pie charts for sector distribution).
+- **Caching**: Used Streamlit's `@st.cache_data` to cache dynamic Monday queries, preventing rate-limiting from multiple queries.

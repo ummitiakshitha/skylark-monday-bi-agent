@@ -107,7 +107,9 @@ elif anthropic_key:
     llm_key = anthropic_key
     st.sidebar.markdown("AI Engine: <span class='status-active'>✓ Anthropic Connected</span>", unsafe_allow_html=True)
 else:
-    st.sidebar.markdown("AI Engine: <span class='status-inactive'>✗ Missing LLM Key</span>", unsafe_allow_html=True)
+    llm_provider = "Mock"
+    llm_key = "mock"
+    st.sidebar.markdown("AI Engine: <span style='color: #f59e0b; font-weight: bold;'>🤖 Mock Mode (Active)</span>", unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 

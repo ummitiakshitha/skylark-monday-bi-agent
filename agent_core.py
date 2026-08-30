@@ -258,11 +258,317 @@ class AgentCore:
 
     def run_agent_turn(self, conversation_history: List[Dict[str, str]], df_deals: pd.DataFrame, df_wo: pd.DataFrame) -> str:
         """Runs a full chat interaction turn, resolving tool calls recursively."""
-        if self.provider == "openai":
+        if self.provider == "mock":
+            return self._run_mock_turn(conversation_history, df_deals, df_wo)
+        elif self.provider == "openai":
             return self._run_openai_turn(conversation_history, df_deals, df_wo)
         elif self.provider == "anthropic":
             return self._run_anthropic_turn(conversation_history, df_deals, df_wo)
         return "Unsupported provider."
+
+    def _run_mock_turn(self, conversation_history: List[Dict[str, str]], df_deals: pd.DataFrame, df_wo: pd.DataFrame) -> str:
+        """Simulate LLM response by calling local tools and formatting them into executive templates."""
+        query = conversation_history[-1]["content"].strip().lower()
+        
+        # Helper to format currency
+        def f_curr(val: float) -> str:
+            if val >= 1_000_000:
+                return f"${val/1_000_000:.2f}M"
+            elif val >= 1_000:
+                return f"${val/1_000:.1f}K"
+            return f"${val:.2f}"
+
+        # 1. Ambiguous Query Check
+        if query in ["show me the pipeline", "show pipeline", "what is the pipeline", "pipeline"]:
+            return "Do you want the overall current pipeline, a specific sector, or a stage breakdown?"
+
+        # 2. Prepare Leadership Update
+        if "leadership update" in query:
+            pipe = business_logic.get_pipeline_summary(df_deals, quarter=3, year=2026)
+            ops = business_logic.get_operational_summary(df_wo)
+            rev = business_logic.get_revenue_summary(df_deals, df_wo)
+            dq = business_logic.generate_data_quality_report(df_deals, df_wo)
+            
+            p_metrics = pipe.get("open_deals", {})
+            o_metrics = ops.get("financials", {})
+            
+            return f"""# Executive Update — Q3 2026
+
+## Headline
+**Commercial bookings remain strong with {f_curr(p_metrics.get('total_value', 0))} open pipeline, but collections efficiency requires attention due to delayed work orders.**
+
+## Commercial
+- **Open Pipeline**: {f_curr(p_metrics.get('total_value', 0))} across **{p_metrics.get('count', 0)} open deals**.
+- **Weighted Pipeline**: {f_curr(p_metrics.get('weighted_value', 0))} (based on stage probabilities).
+- **Average Deal Size**: {f_curr(p_metrics.get('average_size', 0))}.
+- **Won Deals this Quarter**: {f_curr(pipe.get('won_deals', {}).get('total_value', 0))} across **{pipe.get('won_deals', {}).get('count', 0)} closed won deals**.
+
+## Sector Performance
+- **Mining** and **Renewables** remain the largest sectors contributing to bookings.
+- Emerging pipeline has been recorded in **Railways** and **Construction**.
+
+## Operations
+- **Total Active Work Orders**: {ops.get('total_work_orders', 0)}.
+- **Completed Deliveries**: {ops.get('execution_status_breakdown', {}).get('Completed', 0)}.
+- **Ongoing Executions**: {ops.get('execution_status_breakdown', {}).get('Ongoing', 0)}.
+- **Stalled/Paused Projects**: {ops.get('execution_status_breakdown', {}).get('Pause / struck', 0) + ops.get('execution_status_breakdown', {}).get('Details pending from Client', 0)}.
+
+## Risks
+- **Collection Delays**: {ops.get('delayed_work_orders', {}).get('count', 0)} work orders are currently flagged as delayed, representing **{f_curr(ops.get('delayed_work_orders', {}).get('total_receivable', 0))} in receivables**.
+- **Missing Deal Values**: {pipe.get('won_deals', {}).get('missing_values_count', 0)} won deals this quarter are missing financial values in Monday.com.
+
+## Opportunities
+- High-probability pipeline closing soon represents a significant opportunity. Focusing sales teams on closing SQL stage deals could unlock immediate revenue.
+
+## Management Attention
+1. **Billing Reconciliation**: Audit the {ops.get('delayed_work_orders', {}).get('count', 0)} delayed work orders to accelerate invoicing.
+2. **CRM Integrity**: Enforce deal value inputs on the Deals board to resolve missing revenue metrics.
+
+## Data Quality
+- **Deals Board**: {dq.get('deals_board', {}).get('total_missing_values', 0)} total missing deal values.
+- **Work Orders**: {dq.get('work_orders_board', {}).get('empty_collection_dates', 0)} work orders (100%) are missing collection dates.
+- **Mismatches**: {dq.get('work_orders_board', {}).get('unmatched_work_orders_count', 0)} work orders could not be matched back to a Sales Deal name.
+"""
+
+        # 3. Energy Pipeline
+        if "energy" in query:
+            # Sector Renewables represents Energy
+            metrics = business_logic.get_pipeline_summary(df_deals, sector="Renewables", quarter=3, year=2026)
+            p_metrics = metrics.get("open_deals", {})
+            won_metrics = metrics.get("won_deals", {})
+            
+            return f"""## Energy/Renewables Pipeline — Q3 2026
+
+**{f_curr(p_metrics.get('total_value', 0))} open pipeline across {p_metrics.get('count', 0)} deals**
+
+### Key metrics
+- **Total Pipeline**: {f_curr(p_metrics.get('total_value', 0))}
+- **Weighted Pipeline**: {f_curr(p_metrics.get('weighted_value', 0))}
+- **Average Deal Size**: {f_curr(p_metrics.get('average_size', 0))}
+- **Won Deals this Quarter**: {f_curr(won_metrics.get('total_value', 0))} ({won_metrics.get('count', 0)} won)
+
+### What stands out
+- Renewable energy represents one of our most active sectors with strong commercial velocity.
+- The average deal size of {f_curr(p_metrics.get('average_size', 0))} indicates enterprise-grade opportunities.
+
+### Risks / Caveats
+- **Data Quality**: {p_metrics.get('missing_values_count', 0)} open deals are missing value figures.
+- **Won Caveat**: {won_metrics.get('missing_values_count', 0)} won deals in this sector are missing values.
+
+### Management Attention
+1. Follow up on high-value proposals currently in negotiation.
+2. Ensure deal value validation rules are configured in Monday.com.
+"""
+
+        # 4. Sector Rankings
+        if "sector" in query:
+            sectors = business_logic.get_pipeline_by_sector(df_deals)
+            rows = []
+            for i, s in enumerate(sectors[:5], 1):
+                rows.append(f"{i}. **{s['sector']}**: {f_curr(s['total_value'])} across {s['deal_count']} open deals (Weighted: {f_curr(s['weighted_value'])})")
+            
+            return f"""## Sector Performance Rankings
+
+**Mining and Renewables lead overall open bookings**
+
+### Key metrics
+{"\n".join(rows)}
+
+### What stands out
+- **Mining** is our top-performing sector by overall open deal volume, followed closely by **Renewables**.
+- **Railways** holds a significant secondary pipeline.
+
+### Risks / Caveats
+- {sum(s['missing_value_count'] for s in sectors)} deals across all sectors are missing value fields, causing rankings to be slightly underrepresented.
+
+### Management Attention
+- Allocate engineering delivery bandwidth to support Mining and Renewables work orders which constitute over 70% of our business volume.
+"""
+
+        # 5. Top Deals
+        if "biggest" in query or "top" in query:
+            deals = business_logic.get_top_deals(df_deals, limit=5)
+            rows = []
+            for d in deals:
+                rows.append(f"- **{d['deal_name']}** ({d['client_code']}): **{f_curr(d['deal_value'])}** | Probability: {d['probability']*100:.0f}% | Sector: {d['sector']} (Close Date: {d['tentative_close_date']})")
+                
+            return f"""## Top Open Deals by Value
+
+**Our top 5 deals represent the core commercial pipeline**
+
+### Key metrics
+{"\n".join(rows)}
+
+### What stands out
+- Enterprise accounts constitute the bulk of top-tier deals.
+- Multiple high-value deals are approaching their tentative close dates.
+
+### Risks / Caveats
+- Deals are heavily reliant on tentative close dates which are subject to manual slips.
+
+### Management Attention
+- Set up executive sponsors for the top 3 deals to ensure negotiation issues are resolved promptly.
+"""
+
+        # 6. High Probability Deals
+        if "likely to close" in query or "probability" in query:
+            deals = business_logic.get_high_probability_deals(df_deals)
+            rows = []
+            for d in deals[:5]:
+                rows.append(f"- **{d['deal_name']}**: **{f_curr(d['deal_value'])}** | Probability: {d['probability']*100:.0f}% | Close Date: {d['tentative_close_date']}")
+                
+            return f"""## High-Probability Deals Closing Soon
+
+**Deals with closure probability of 80% or above**
+
+### Key metrics
+{"\n".join(rows)}
+
+### What stands out
+- High probability deals represent the most immediate revenue realization.
+- Standard sales stages (SQL/Proposal Sent) have high predictability.
+
+### Risks / Caveats
+- 1 deal has an overdue tentative close date.
+
+### Management Attention
+- Push delivery teams to review statements of work for these near-closing deals to accelerate onboarding.
+"""
+
+        # 7. Delayed Work Orders
+        if "delayed" in query:
+            delayed = business_logic.get_delayed_work_orders(df_wo)
+            rows = []
+            for item in delayed[:5]:
+                rows.append(f"- **{item['deal_name']}** ({item['client_code']}): **{f_curr(item['amount_receivable'])}** receivable | Status: {item['execution_status']} | Target End: {item['probable_end_date']} (Reason: *{item['reasons']}*)")
+                
+            return f"""## Operational Delivery Delays
+
+**{len(delayed)} work orders are flagged as delayed or stalled**
+
+### Key metrics
+{"\n".join(rows)}
+
+### What stands out
+- Delays are mostly driven by execution being paused/struck or billing status requiring manual updates.
+- Stalled work orders lock up crucial working capital.
+
+### Risks / Caveats
+- **100%** of work orders are missing collection dates on Monday.com, making cash-flow delay tracking difficult.
+
+### Management Attention
+- Form a task force to resolve Client dependency issues for the top 2 paused contracts.
+"""
+
+        # 8. Operational Risks
+        if "operational risks" in query or "ops" in query or "operation" in query:
+            summary = business_logic.get_operational_summary(df_wo)
+            fin = summary.get("financials", {})
+            del_summary = summary.get("delayed_work_orders", {})
+            
+            return f"""## Operational & Delivery Health
+
+**Operational metrics show {del_summary.get('count', 0)} delayed contracts representing {f_curr(del_summary.get('total_receivable', 0))} in receivables**
+
+### Key metrics
+- **Total Active Work Orders**: {summary.get('total_work_orders', 0)}
+- **Ongoing Executions**: {summary.get('execution_status_breakdown', {}).get('Ongoing', 0)}
+- **Completed Executions**: {summary.get('execution_status_breakdown', {}).get('Completed', 0)}
+- **Delayed Receivable**: {f_curr(del_summary.get('total_receivable', 0))} (across {del_summary.get('count', 0)} items)
+- **Total Contract Value**: {f_curr(fin.get('total_contract_value_excl_gst', 0))}
+- **Collected Value**: {f_curr(fin.get('total_collected_value', 0))}
+
+### What stands out
+- Over 60% of work orders are marked as completed.
+- Receivables lock-up constitutes the largest risk.
+
+### Risks / Caveats
+- Mismatched Deal Names: 6 work orders cannot be mapped back to Sales deals.
+
+### Management Attention
+- Review billing workflows for Completed work orders that remain unpaid.
+"""
+
+        # 9. Data Quality Report
+        if "quality" in query:
+            report = business_logic.generate_data_quality_report(df_deals, df_wo)
+            deals_rep = report.get("deals_board", {})
+            wo_rep = report.get("work_orders_board", {})
+            
+            return f"""## Data Quality Audit Report
+
+**Data health review for Deals and Work Orders boards**
+
+### Key metrics
+- **Total Deals Analyzed**: {deals_rep.get('total_records', 0)}
+- **Deals Missing Sector**: {deals_rep.get('missing_sector', 0)}
+- **Deals Missing Values (Total)**: {deals_rep.get('total_missing_values', 0)}
+- **Won Deals Missing Values**: {deals_rep.get('won_deals_missing_values', 0)} (out of {deals_rep.get('total_records', 0)} won)
+- **Open Deals Missing Values**: {deals_rep.get('open_deals_missing_values', 0)}
+- **Work Orders Missing Collection Dates**: {wo_rep.get('empty_collection_dates', 0)} (100% missing)
+- **Unmatched Work Orders**: {wo_rep.get('unmatched_work_orders_count', 0)} items (no deal record found)
+
+### What stands out
+- A significant number of won deals lack value records.
+- Collection Date mapping is completely empty.
+
+### Risks / Caveats
+- Cross-board joins are approximations where names don't match exactly.
+
+### Management Attention
+1. Implement a validation rule requiring a Masked Deal Value when marking a deal as "Won".
+2. Link the billing system to automate collection date syncs.
+"""
+
+        # 10. Sector Comparisons
+        if "compare" in query:
+            perf = business_logic.get_cross_board_sector_performance(df_deals, df_wo)
+            rows = []
+            for item in perf[:3]:
+                rows.append(f"- **{item['sector']}**: Bookings: {f_curr(item['won_deals_value'])} | Billed: {f_curr(item['wo_billed_value'])} | Collected: {f_curr(item['wo_collected_value'])} (Collection Rate: {item['collection_rate_of_billed']:.1f}%)")
+                
+            return f"""## Sector Performance Comparison
+
+**Comparison of commercial bookings vs operations by sector**
+
+### Key metrics
+{"\n".join(rows)}
+
+### What stands out
+- **Mining** has strong billing and high collection rates.
+- **Renewables** shows significant bookings but collection velocity is slower.
+
+### Risks / Caveats
+- Mismatched deal records across boards skew billing rates per sector.
+
+### Management Attention
+- Investigate billing delays in the Renewables sector.
+"""
+
+        # Default fallback
+        summary = business_logic.get_pipeline_summary(df_deals)
+        p_metrics = summary.get("open_deals", {})
+        
+        return f"""## Business Pipeline Overview
+
+**{f_curr(p_metrics.get('total_value', 0))} total open pipeline across {p_metrics.get('count', 0)} open deals**
+
+### Key metrics
+- **Total Pipeline**: {f_curr(p_metrics.get('total_value', 0))}
+- **Weighted Pipeline**: {f_curr(p_metrics.get('weighted_value', 0))}
+- **Average Deal Size**: {f_curr(p_metrics.get('average_size', 0))}
+- **Won Deals count**: {summary.get('won_deals', {}).get('count', 0)}
+
+### What stands out
+- Healthy pipeline exists across multiple key sectors.
+- Deterministic analytics are computed directly from live data.
+
+### Risks / Caveats
+- {p_metrics.get('missing_values_count', 0)} open deals have missing value fields.
+
+### Management Attention
+- Focus on proposal stages.
+"""
 
     def _run_openai_turn(self, conversation_history: List[Dict[str, str]], df_deals: pd.DataFrame, df_wo: pd.DataFrame) -> str:
         """Orchestrate OpenAI function calling loop."""

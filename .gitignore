@@ -18,6 +18,6 @@ env/
 .idea/
 .gemini/
 
-# System files
-.DS_Store
-Thumbs.db
+# Custom ignores
+*.zip
+
